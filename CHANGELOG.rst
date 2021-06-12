@@ -2,8 +2,8 @@
 Changelog for package plotjuggler
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
+3.2.0 (2021-06-12)
+------------------
 * file removed
 * fix potential bug in StringSeries
 * fix rebase
