@@ -9,13 +9,20 @@
 void connect_callback(struct mosquitto *mosq, void *context, int result)
 {
   DataStreamMQTT* _this = static_cast<DataStreamMQTT*>(context);
-  printf("connect callback, rc=%d\n", result);
+
+  if( result != 0 )
+  {
+    qDebug() << QString("Problem connecting to MQTT: %1").arg(result);
+    return;
+  }
+
+  mosquitto_subscribe(mosq, nullptr,_this->_topic_filter.toStdString().c_str(), _this->_qos);
 }
 
 void disconnect_callback(struct mosquitto *mosq, void *context, int result)
 {
   DataStreamMQTT* _this = static_cast<DataStreamMQTT*>(context);
-  printf("disconnect callback, rc=%d\n", result);
+  qDebug() << "disconnect callback, rc = " << result;
 }
 
 void message_callback(struct mosquitto *mosq, void *context, const struct mosquitto_message *message)
@@ -43,12 +50,6 @@ void message_callback(struct mosquitto *mosq, void *context, const struct mosqui
 //    _this->_protocol_issue = true;
     return;
   }
-
-  //  printf("     topic: %s\n", topicName);
-  //  printf("   message: %.*s\n", message->payloadlen, (char*)message->payload);
-//  MQTTAsync_freeMessage(&message);
-//  MQTTAsync_free(topicName);
-
   emit _this->dataReceived();
 }
 
@@ -61,12 +62,14 @@ void message_callback(struct mosquitto *mosq, void *context, const struct mosqui
 void subscribe_callback(struct mosquitto *mosq, void *context, int mid, int qos_count, const int *granted_qos)
 {
   DataStreamMQTT* _this = static_cast<DataStreamMQTT*>(context);
+  _this->_subscribed = true;
 }
 
 void unsubscribe_callback(struct mosquitto *mosq, void *context, int result)
 {
   DataStreamMQTT* _this = static_cast<DataStreamMQTT*>(context);
-  printf("unsubscribe callback, rc=%d\n", result);
+  qDebug() << QString("Subscription Failure. Code %1").arg(result);
+  _this->_finished = true;
 }
 
 
@@ -198,10 +201,19 @@ bool DataStreamMQTT::start(QStringList *)
 
   _subscribed = false;
   _finished = false;
+  _running = false;
+
+  if(mosquitto_sub_topic_check(_topic_filter.toStdString().c_str()) == MOSQ_ERR_INVAL)
+  {
+    QMessageBox::warning(nullptr,tr("MQTT Client"),
+                         tr("Error: Invalid subscription topic '%1', are all '+' and '#' wildcards correct?").arg(_topic_filter),
+                         QMessageBox::Ok);
+    return false;
+  }
+
 //  _protocol_issue = false;
 
-  void* context;
-  struct mosquitto *mosq = mosquitto_new(address.toStdString().c_str(), true, context);
+  struct mosquitto *mosq = mosquitto_new(address.toStdString().c_str(), true, this);
 
   if(!mosq)
   {
@@ -218,6 +230,7 @@ bool DataStreamMQTT::start(QStringList *)
   mosquitto_subscribe_callback_set(mosq, subscribe_callback);
   mosquitto_unsubscribe_callback_set(mosq, unsubscribe_callback);
 
+  client_opts_set(mosq, &cfg)
 
   _running = true;
 //  _protocol_issue_timer.start(500);
