@@ -4,7 +4,7 @@
 #include <QSettings>
 #include <QDebug>
 #include <QUuid>
-
+#include <QIntValidator>
 
 void connect_callback(struct mosquitto *mosq, void *context, int result)
 {
@@ -77,14 +77,62 @@ void unsubscribe_callback(struct mosquitto *mosq, void *context, int result)
 class MQTT_Dialog: public QDialog
 {
 public:
-  MQTT_Dialog():
+  MQTT_Dialog(MosquittoConfig* config):
     QDialog(nullptr),
     ui(new Ui::DataStreamMQTT)
+    , _config(config)
   {
     ui->setupUi(this);
+    ui->lineEditPort->setValidator( new QIntValidator );
 
     static QString uuid =  QString::number(rand());
-    ui->lineEditClientID->setText(tr("Plotjuggler-") + uuid);
+    _config->id = tr("Plotjuggler-") + uuid;
+    ui->lineEditClientID->setText(_config->id);
+
+    QSettings settings;
+
+    _config->host = settings.value("DataStreamMQTT::host").toString();
+    ui->lineEditHost->setText( _config->host );
+
+    _config->port = settings.value("DataStreamMQTT::port", 1883).toInt();
+    ui->lineEditPort->setText( QString::number(_config->port) );
+
+    _config->qos = settings.value("DataStreamMQTT::qos", 0).toInt();
+    ui->comboBoxQoS->setCurrentIndex(_config->qos);
+
+    QString topic_filter = settings.value("DataStreamMQTT::filter").toString();
+    // TODO
+    ui->lineEditTopicFilter->setText(topic_filter );
+
+    QString protocol = settings.value("DataStreamMQTT::protocol", "JSON").toString();
+    ui->comboBoxProtocol->setCurrentText(protocol);
+
+    _config->username = settings.value("DataStreamMQTT::username", "").toString();
+    ui->lineEditUsername->setText(_config->username);
+
+    _config->password = settings.value("DataStreamMQTT::password", "").toString();
+    ui->lineEditPassword->setText(_config->password);
+  }
+
+  void saveParameters()
+  {
+    QSettings settings;
+
+    _config->host = ui->lineEditHost->text();
+//    _protocol = ui->comboBoxProtocol->currentText();
+//    _topic_filter = ui->lineEditTopicFilter->text();
+    _config->qos = ui->comboBoxQoS->currentIndex();
+    QString cliend_id = ui->lineEditClientID->text();
+    _config->username = ui->lineEditUsername->text();
+    _config->password = ui->lineEditPassword->text();
+
+    // save back to service
+    settings.setValue("DataStreamMQTT::host", _config->host);
+//    settings.setValue("DataStreamMQTT::filter", _topic_filter);
+    settings.setValue("DataStreamMQTT::protocol_version", _config->protocol_version);
+    settings.setValue("DataStreamMQTT::qos", _config->qos);
+    settings.setValue("DataStreamMQTT::username", _config->username);
+    settings.setValue("DataStreamMQTT::password", _config->password);
   }
 
   ~MQTT_Dialog() {
@@ -93,10 +141,12 @@ public:
       auto item = ui->layoutOptions->takeAt(0);
       item->widget()->setParent(nullptr);
     }
+
     delete ui;
   }
 
   Ui::DataStreamMQTT* ui;
+  MosquittoConfig* _config;
 };
 
 //---------------------------------------------
@@ -128,7 +178,7 @@ bool DataStreamMQTT::start(QStringList *)
     return false;
   }
 
-  MQTT_Dialog* dialog = new MQTT_Dialog();
+  MQTT_Dialog* dialog = new MQTT_Dialog( &_config );
 
   for( const auto& it: *availableParsers())
   {
@@ -160,44 +210,12 @@ bool DataStreamMQTT::start(QStringList *)
             }
           });
 
-  // load previous values
-  QSettings settings;
-  QString address = settings.value("DataStreamMQTT::address").toString();
-  _protocol = settings.value("DataStreamMQTT::protocol", "JSON").toString();
-  _topic_filter = settings.value("DataStreamMQTT::filter").toString();
-  _qos = settings.value("DataStreamMQTT::qos", 0).toInt();
-  QString username = settings.value("DataStreamMQTT::username", "").toString();
-  QString password = settings.value("DataStreamMQTT::password", "").toString();
-
-  dialog->ui->lineEditAddress->setText( address );
-  dialog->ui->comboBoxProtocol->setCurrentText(_protocol);
-  dialog->ui->lineEditTopicFilter->setText( _topic_filter );
-  dialog->ui->comboBoxQoS->setCurrentIndex(_qos);
-  dialog->ui->lineEditUsername->setText(username);
-  dialog->ui->lineEditPassword->setText(password);
-
   if( dialog->exec() == QDialog::Rejected )
   {
     return false;
   }
 
-  address = dialog->ui->lineEditAddress->text();
-  _protocol = dialog->ui->comboBoxProtocol->currentText();
-  _topic_filter = dialog->ui->lineEditTopicFilter->text();
-  _qos = dialog->ui->comboBoxQoS->currentIndex();
-  QString cliend_id = dialog->ui->lineEditClientID->text();
-  username = dialog->ui->lineEditUsername->text();
-  password = dialog->ui->lineEditPassword->text();
-
   dialog->deleteLater();
-
-  // save back to service
-  settings.setValue("DataStreamMQTT::address", address);
-  settings.setValue("DataStreamMQTT::filter", _topic_filter);
-  settings.setValue("DataStreamMQTT::protocol", _protocol);
-  settings.setValue("DataStreamMQTT::qos", _qos);
-  settings.setValue("DataStreamMQTT::username", username);
-  settings.setValue("DataStreamMQTT::password", password);
 
   _subscribed = false;
   _finished = false;
