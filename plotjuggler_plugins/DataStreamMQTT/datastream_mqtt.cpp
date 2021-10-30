@@ -5,6 +5,7 @@
 #include <QDebug>
 #include <QUuid>
 #include <QIntValidator>
+#include <QMessageBox>
 
 void connect_callback(struct mosquitto *mosq, void *context, int result)
 {
@@ -16,7 +17,13 @@ void connect_callback(struct mosquitto *mosq, void *context, int result)
     return;
   }
 
-  mosquitto_subscribe(mosq, nullptr,_this->_topic_filter.toStdString().c_str(), _this->_qos);
+  auto& config = _this->config;
+
+  for(const auto& topic: config.topics)
+  {
+    mosquitto_subscribe(mosq, NULL, topic.toStdString().c_str(), config.qos);
+  }
+
 }
 
 void disconnect_callback(struct mosquitto *mosq, void *context, int result)
@@ -178,7 +185,7 @@ bool DataStreamMQTT::start(QStringList *)
     return false;
   }
 
-  MQTT_Dialog* dialog = new MQTT_Dialog( &_config );
+  MQTT_Dialog* dialog = new MQTT_Dialog( &config );
 
   for( const auto& it: *availableParsers())
   {
@@ -247,8 +254,6 @@ bool DataStreamMQTT::start(QStringList *)
 
   mosquitto_subscribe_callback_set(mosq, subscribe_callback);
   mosquitto_unsubscribe_callback_set(mosq, unsubscribe_callback);
-
-  client_opts_set(mosq, &cfg)
 
   _running = true;
 //  _protocol_issue_timer.start(500);

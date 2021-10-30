@@ -49,7 +49,6 @@ struct MosquittoConfig {
 #endif
   bool clean_session; /* sub */
   std::vector<QString> topics; /* sub */
-  int topic_count; /* sub */
   bool no_retain; /* sub */
   std::vector<QString> filter_outs; /* sub */
   int filter_out_count; /* sub */
@@ -99,7 +98,8 @@ public:
 
   std::unordered_map<std::string, PJ::MessageParserPtr> _parsers;
 
-  MosquittoConfig _config;
+  struct mosquitto *mosq;
+  MosquittoConfig config;
 
 
 private slots:
