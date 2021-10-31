@@ -17,11 +17,11 @@ void connect_callback(struct mosquitto *mosq, void *context, int result)
     return;
   }
 
-  auto& config = _this->config;
+  auto& config = _this->_config;
 
   for(const auto& topic: config.topics)
   {
-    mosquitto_subscribe(mosq, NULL, topic.toStdString().c_str(), config.qos);
+    mosquitto_subscribe(mosq, nullptr, topic.c_str(), config.qos);
   }
 
 }
@@ -39,8 +39,8 @@ void message_callback(struct mosquitto *mosq, void *context, const struct mosqui
   auto it = _this->_parsers.find(message->topic);
   if( it == _this->_parsers.end() )
   {
-    auto parser = _this->availableParsers()->at( _this->_protocol )->createInstance({}, _this->dataMap());
-    it = _this->_parsers.insert( {message->topic, parser} ).first;
+    //auto parser = _this->availableParsers()->at( _this->_protocol )->createInstance({}, _this->dataMap());
+    //it = _this->_parsers.insert( {message->topic, parser} ).first;
   }
   auto& parser = it->second;
 
@@ -79,81 +79,91 @@ void unsubscribe_callback(struct mosquitto *mosq, void *context, int result)
   _this->_finished = true;
 }
 
-
-
 class MQTT_Dialog: public QDialog
 {
 public:
-  MQTT_Dialog(MosquittoConfig* config):
+  MQTT_Dialog():
     QDialog(nullptr),
     ui(new Ui::DataStreamMQTT)
-    , _config(config)
   {
     ui->setupUi(this);
     ui->lineEditPort->setValidator( new QIntValidator );
 
-    static QString uuid =  QString::number(rand());
-    _config->id = tr("Plotjuggler-") + uuid;
-    ui->lineEditClientID->setText(_config->id);
+    static QString uuid =  QString("Plotjuggler-") + QString::number(rand());
+    ui->lineEditClientID->setText(uuid);
 
     QSettings settings;
 
-    _config->host = settings.value("DataStreamMQTT::host").toString();
-    ui->lineEditHost->setText( _config->host );
+    QString host = settings.value("MosquittoMQTT::host").toString();
+    ui->lineEditHost->setText( host );
 
-    _config->port = settings.value("DataStreamMQTT::port", 1883).toInt();
-    ui->lineEditPort->setText( QString::number(_config->port) );
+    int port = settings.value("MosquittoMQTT::port", 1883).toInt();
+    ui->lineEditPort->setText( QString::number(port) );
 
-    _config->qos = settings.value("DataStreamMQTT::qos", 0).toInt();
-    ui->comboBoxQoS->setCurrentIndex(_config->qos);
+    int qos = settings.value("MosquittoMQTT::qos", 0).toInt();
+    ui->comboBoxQoS->setCurrentIndex(qos);
 
-    QString topic_filter = settings.value("DataStreamMQTT::filter").toString();
-    // TODO
+    int protocol_mqtt = settings.value("MosquittoMQTT::protocol_version").toInt();
+    ui->comboBoxVersion->setCurrentIndex(protocol_mqtt);
+
+    QString topic_filter = settings.value("MosquittoMQTT::filter").toString();
     ui->lineEditTopicFilter->setText(topic_filter );
 
-    QString protocol = settings.value("DataStreamMQTT::protocol", "JSON").toString();
+    QString protocol = settings.value("MosquittoMQTT::serialization_protocol", "JSON").toString();
     ui->comboBoxProtocol->setCurrentText(protocol);
 
-    _config->username = settings.value("DataStreamMQTT::username", "").toString();
-    ui->lineEditUsername->setText(_config->username);
+    QString username = settings.value("MosquittoMQTT::username", "").toString();
+    ui->lineEditUsername->setText(username);
 
-    _config->password = settings.value("DataStreamMQTT::password", "").toString();
-    ui->lineEditPassword->setText(_config->password);
+    QString password = settings.value("MosquittoMQTT::password", "").toString();
+    ui->lineEditPassword->setText(password);
   }
 
-  void saveParameters()
+  void saveParameters(MosquittoConfig* config)
   {
-    QSettings settings;
+    config->id = ui->lineEditClientID->text().toStdString();
+    config->host = ui->lineEditHost->text().toStdString();
+    config->port = ui->lineEditPort->text().toInt();
+    config->topics.clear();
+    config->topics.push_back(ui->lineEditTopicFilter->text().toStdString());
+    config->username = ui->lineEditUsername->text().toStdString();
+    config->password = ui->lineEditPassword->text().toStdString();
+    config->qos = ui->comboBoxQoS->currentIndex();
+    config->protocol_version =
+        MQTT_PROTOCOL_V31 + ui->comboBoxVersion->currentIndex();
 
-    _config->host = ui->lineEditHost->text();
-//    _protocol = ui->comboBoxProtocol->currentText();
-//    _topic_filter = ui->lineEditTopicFilter->text();
-    _config->qos = ui->comboBoxQoS->currentIndex();
-    QString cliend_id = ui->lineEditClientID->text();
-    _config->username = ui->lineEditUsername->text();
-    _config->password = ui->lineEditPassword->text();
-
-    // save back to service
-    settings.setValue("DataStreamMQTT::host", _config->host);
-//    settings.setValue("DataStreamMQTT::filter", _topic_filter);
-    settings.setValue("DataStreamMQTT::protocol_version", _config->protocol_version);
-    settings.setValue("DataStreamMQTT::qos", _config->qos);
-    settings.setValue("DataStreamMQTT::username", _config->username);
-    settings.setValue("DataStreamMQTT::password", _config->password);
+    config->keepalive = 60; // TODO
+    config->bind_address = ""; //TODO
+    config->will_retain = false; //TODO
+    config->max_inflight = 20; //TODO
+    config->clean_session = true;  //TODO
+    config->eol = true;  //TODO
   }
 
-  ~MQTT_Dialog() {
+  ~MQTT_Dialog()
+  {
     while( ui->layoutOptions->count() > 0)
     {
       auto item = ui->layoutOptions->takeAt(0);
       item->widget()->setParent(nullptr);
     }
 
+    QSettings settings;
+
+    // save back to service
+    settings.setValue("MosquittoMQTT::host", ui->lineEditHost->text());
+    settings.setValue("MosquittoMQTT::port", ui->lineEditPort->text().toInt());
+    settings.setValue("MosquittoMQTT::filter", ui->lineEditTopicFilter->text());
+    settings.setValue("MosquittoMQTT::username", ui->lineEditPassword->text());
+    settings.setValue("MosquittoMQTT::password", ui->lineEditUsername->text());
+    settings.setValue("MosquittoMQTT::protocol_version", ui->comboBoxVersion->currentIndex());
+    settings.setValue("MosquittoMQTT::qos", ui->comboBoxQoS->currentIndex());
+    settings.setValue("MosquittoMQTT::serialization_protocol", ui->comboBoxProtocol->currentText());
+
     delete ui;
   }
 
   Ui::DataStreamMQTT* ui;
-  MosquittoConfig* _config;
 };
 
 //---------------------------------------------
@@ -185,7 +195,7 @@ bool DataStreamMQTT::start(QStringList *)
     return false;
   }
 
-  MQTT_Dialog* dialog = new MQTT_Dialog( &config );
+  MQTT_Dialog* dialog = new MQTT_Dialog();
 
   for( const auto& it: *availableParsers())
   {
@@ -197,7 +207,6 @@ bool DataStreamMQTT::start(QStringList *)
       dialog->ui->layoutOptions->addWidget( widget );
     }
   }
-
 
   std::shared_ptr<MessageParserCreator> parser_creator;
 
@@ -222,23 +231,29 @@ bool DataStreamMQTT::start(QStringList *)
     return false;
   }
 
+  dialog->saveParameters(&_config);
+
   dialog->deleteLater();
 
   _subscribed = false;
   _finished = false;
   _running = false;
 
-  if(mosquitto_sub_topic_check(_topic_filter.toStdString().c_str()) == MOSQ_ERR_INVAL)
+  for(const auto& filter: _config.topics)
   {
-    QMessageBox::warning(nullptr,tr("MQTT Client"),
-                         tr("Error: Invalid subscription topic '%1', are all '+' and '#' wildcards correct?").arg(_topic_filter),
-                         QMessageBox::Ok);
-    return false;
+    if(mosquitto_sub_topic_check(filter.c_str()) == MOSQ_ERR_INVAL)
+    {
+      QMessageBox::warning(nullptr,tr("MQTT Client"),
+                           tr("Error: Invalid subscription topic '%1', are all '+' and '#' wildcards correct?")
+                               .arg(QString::fromStdString(filter)),
+                           QMessageBox::Ok);
+      return false;
+    }
   }
 
 //  _protocol_issue = false;
 
-  struct mosquitto *mosq = mosquitto_new(address.toStdString().c_str(), true, this);
+  struct mosquitto *mosq = mosquitto_new(_config.id.c_str(), true, this);
 
   if(!mosq)
   {
@@ -255,8 +270,37 @@ bool DataStreamMQTT::start(QStringList *)
   mosquitto_subscribe_callback_set(mosq, subscribe_callback);
   mosquitto_unsubscribe_callback_set(mosq, unsubscribe_callback);
 
+  int rc = mosquitto_connect_bind(mosq,
+                                  _config.host.c_str(),
+                                  _config.port,
+                                  _config.keepalive,
+                                  nullptr); // TODO bind
+  if(rc>0)
+  {
+    if(rc == MOSQ_ERR_ERRNO)
+    {
+      char err[1024];
+#ifndef WIN32
+      strerror_r(errno, err, 1024);
+#else
+      FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM, NULL, errno, 0, (LPTSTR)&err, 1024, NULL);
+#endif
+      QMessageBox::warning(nullptr, tr("MQTT Client"),
+                           tr("Error: %1").arg(err),  QMessageBox::Ok);
+    }
+    else
+    {
+      QMessageBox::warning(nullptr, tr("MQTT Client"),
+                           tr("Unable to connect (%1)").arg(mosquitto_strerror(rc)),
+                           QMessageBox::Ok);
+    }
+    return false;
+  }
+
   _running = true;
-//  _protocol_issue_timer.start(500);
+
+  _mqtt_thread = std::thread(
+      [=](){ mosquitto_loop_forever(mosq, -1, 1); });
 
   return _running;
 }
@@ -266,8 +310,6 @@ void DataStreamMQTT::shutdown()
   if( _running )
   {
     _disconnection_done = false;
-
-
     _running = false;
     _parsers.clear();
   }

@@ -4,7 +4,7 @@
 #include <QDialog>
 #include <QtPlugin>
 #include <QTimer>
-#include <thread>
+#include <QThread>
 #include "PlotJuggler/datastreamer_base.h"
 #include "PlotJuggler/messageparser_base.h"
 #include "ui_datastream_mqtt.h"
@@ -14,52 +14,51 @@
 using namespace PJ;
 
 struct MosquittoConfig {
-  QString id;
-  QString id_prefix;
+  std::string id;
+  std::string id_prefix;
   int protocol_version;
   int keepalive;
-  QString host;
+  std::string host;
   int port;
   int qos;
   bool retain;
-  QString bind_address;
+  std::string bind_address;
 #ifdef WITH_SRV
   bool use_srv;
 #endif
   unsigned int max_inflight;
-  QString username;
-  QString password;
-  QString will_topic;
-  QString will_payload;
+  std::string username;
+  std::string password;
+  std::string will_topic;
+  std::string will_payload;
   long will_payloadlen;
   int will_qos;
   bool will_retain;
 #ifdef WITH_TLS
-  QString cafile;
-  QString capath;
-  QString certfile;
-  QString keyfile;
-  QString ciphers;
+  std::string cafile;
+  std::string capath;
+  std::string certfile;
+  std::string keyfile;
+  std::string ciphers;
   bool insecure;
-  QString tls_version;
+  std::string tls_version;
 #  ifdef WITH_TLS_PSK
-  QString psk;
-  QString psk_identity;
+  std::string psk;
+  std::string psk_identity;
 #  endif
 #endif
   bool clean_session; /* sub */
-  std::vector<QString> topics; /* sub */
+  std::vector<std::string> topics; /* sub */
   bool no_retain; /* sub */
-  std::vector<QString> filter_outs; /* sub */
-  int filter_out_count; /* sub */
+  std::vector<std::string> filter_outs; /* sub */
   bool verbose; /* sub */
   bool eol; /* sub */
   int msg_count; /* sub */
 #ifdef WITH_SOCKS
-  QString socks5_host;
+  std::string socks5_host;
   int socks5_port;
-  QString socks5_username;
-  QString socks5_password;
+  std::string socks5_username;
+  std::string socks5_password;
 #endif
 };
 
@@ -99,7 +98,9 @@ public:
   std::unordered_map<std::string, PJ::MessageParserPtr> _parsers;
 
   struct mosquitto *mosq;
-  MosquittoConfig config;
+  MosquittoConfig _config;
+
+  std::thread _mqtt_thread;
 
 
 private slots:
