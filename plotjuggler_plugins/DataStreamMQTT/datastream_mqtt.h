@@ -31,7 +31,6 @@ struct MosquittoConfig {
   std::string password;
   std::string will_topic;
   std::string will_payload;
-  long will_payloadlen;
   int will_qos;
   bool will_retain;
 #ifdef WITH_TLS
@@ -60,6 +59,11 @@ struct MosquittoConfig {
   std::string socks5_username;
   std::string socks5_password;
 #endif
+  mosquitto_property *connect_props;
+  mosquitto_property *subscribe_props;
+  mosquitto_property *unsubscribe_props;
+  mosquitto_property *disconnect_props;
+  mosquitto_property *will_props = nullptr;
 };
 
 
@@ -97,11 +101,11 @@ public:
 
   std::unordered_map<std::string, PJ::MessageParserPtr> _parsers;
 
-  struct mosquitto *mosq;
+  struct mosquitto *_mosq = nullptr;
   MosquittoConfig _config;
 
   std::thread _mqtt_thread;
-
+  QString _protocol;
 
 private slots:
 

@@ -119,7 +119,7 @@ bool ProtobufParser::parseMessage(const MessageRef serialized_msg,
           }break;
         }
 
-        if( !is_double )
+        if( is_double )
         {
           auto& series = this->getSeries(key + suffix);
           series.pushBack({timestamp, value});
@@ -145,13 +145,15 @@ ProtobufParserCreator::ProtobufParserCreator()
   ui->pushButtonRemove->setIcon(LoadSvg(":/resources/svg/trash.svg", theme));
 
   connect( ui->pushButtonLoad, &QPushButton::clicked, this, &ProtobufParserCreator::onLoadFile);
+  connect( ui->pushButtonRemove, &QPushButton::clicked, this, &ProtobufParserCreator::onRemoveFile);
 
   auto tmp_map = settings.value("ProtobufParserCreator.protoMap").toMap();
+
   QMapIterator<QString, QVariant> it(tmp_map);
   while (it.hasNext())
   {
-    it.next();
-    getFileDescriptor( it.value().toByteArray(), it.key() );
+    it.next();  
+    updateDescription(it.key(), it.value().toByteArray());
   }
 
   connect( ui->listWidget, &QListWidget::currentRowChanged,
@@ -164,27 +166,44 @@ ProtobufParserCreator::ProtobufParserCreator()
   {
     ui->listWidget->setCurrentItem(proto_items.front());
   }
+  _selected_file = last_proto;
+
   QString last_type = settings.value("ProtobufParserCreator.lastType").toString();
   int combo_index = ui->comboBox->findText(last_type, Qt::MatchExactly);
   if( !last_type.isEmpty() && combo_index != -1)
   {
     ui->comboBox->setCurrentIndex(combo_index);
+    onComboChanged(last_type);
   }
 
-  connect( ui->comboBox, qOverload<int>(&QComboBox::currentIndexChanged),
+  connect( ui->comboBox, qOverload<const QString&>(&QComboBox::currentIndexChanged),
           this, &ProtobufParserCreator::onComboChanged );
+}
+
+void ProtobufParserCreator::saveSettings()
+{
+  QSettings settings;
+  QMap<QString, QVariant> tmp;
+  QMapIterator<QString, Info> it(_files);
+  while (it.hasNext())
+  {
+    it.next();
+    tmp.insert(it.key(), it.value().proto_text);
+  }
+  settings.setValue("ProtobufParserCreator.protoMap", tmp);
 }
 
 ProtobufParserCreator::~ProtobufParserCreator()
 {
+  saveSettings();
   delete ui;
 }
 
 MessageParserPtr ProtobufParserCreator::createInstance(
     const std::string &topic_name, PlotDataMapRef &data)
 {
-  auto description = getDescription();
-  return std::make_shared<ProtobufParser>(topic_name, data, description);
+
+  return std::make_shared<ProtobufParser>(topic_name, data, _selected_descriptor);
 }
 
 void ProtobufParserCreator::onLoadFile()
@@ -195,7 +214,7 @@ void ProtobufParserCreator::onLoadFile()
       settings.value("ProtobufParserCreator.loadDirectory", QDir::currentPath()).toString();
 
   QString file_name = QFileDialog::getOpenFileName(_widget, tr("Load StyleSheet"),
-                                                  directory_path, tr("(*.proto)"));
+                                                   directory_path, tr("(*.proto)"));
 
   if (file_name.isEmpty())
   {
@@ -206,48 +225,76 @@ void ProtobufParserCreator::onLoadFile()
   file.open(QIODevice::ReadOnly);
   QByteArray proto_array = file.readAll();
 
-  bool res = getFileDescriptor(proto_array, QFileInfo(file_name).baseName() );
+  updateDescription(QFileInfo(file_name).baseName(), proto_array);
 
-  if(res)
+  directory_path = QFileInfo(file_name).absolutePath();
+  settings.setValue("ProtobufParserCreator.loadDirectory", directory_path);
+
+  saveSettings();
+}
+
+void ProtobufParserCreator::onRemoveFile()
+{
+  auto selected = ui->listWidget->selectedItems();
+
+  while(!selected.isEmpty())
   {
-    directory_path = QFileInfo(file_name).absolutePath();
-    settings.setValue("ProtobufParserCreator.loadDirectory", directory_path);
-    QMap<QString, QVariant> tmp;
-    QMapIterator<QString, QByteArray> it(_proto_files);
-    while (it.hasNext())
-    {
-      it.next();
-      tmp.insert(it.key(), it.value());
-    }
-    settings.setValue("ProtobufParserCreator.protoMap", tmp);
+    auto item = selected.front();
+    _files.remove(item->text());
+    delete ui->listWidget->takeItem(ui->listWidget->row(item));
+    selected.pop_front();
   }
+  saveSettings();
 }
 
 void ProtobufParserCreator::onSelectionChanged(int row)
 {
+  if( row == -1 )
+  {
+    ui->comboBox->clear();
+    ui->comboBox->setEnabled(false);
+    ui->protoPreview->setText("");
+    return;
+  }
   QString filename = ui->listWidget->item(row)->text();
-  ui->protoPreview->setText( _proto_files[filename] );
+  const auto& info = _files[filename];
+
+  ui->protoPreview->setText( info.proto_text );
 
   ui->comboBox->clear();
+  ui->comboBox->setEnabled(true);
 
-  auto file_desc = _file_descriptors[filename];
-
-  for(int i=0; i < file_desc->message_type_count(); i++)
+  for(const auto& it: info.descriptors)
   {
-    ui->comboBox->addItem( QString::fromStdString(file_desc->message_type(i)->name()) );
+    ui->comboBox->addItem( it.first );
   }
+
+  _selected_file = filename;
+
   QSettings settings;
   settings.setValue("ProtobufParserCreator.lastProtoSelection", filename);
 }
 
-void ProtobufParserCreator::onComboChanged(int)
+void ProtobufParserCreator::onComboChanged(const QString& text)
 {
-  QSettings settings;
-  settings.setValue("ProtobufParserCreator.lastType", ui->comboBox->currentText());
+  auto info_it = _files.find(_selected_file);
+  if( info_it != _files.end())
+  {
+    auto descr_it = info_it->descriptors.find(text);
+    if( descr_it != info_it->descriptors.end())
+    {
+      _selected_descriptor = descr_it->second;
+      QSettings settings;
+      settings.setValue("ProtobufParserCreator.lastType", text);
+    }
+  }
 }
 
-bool ProtobufParserCreator::getFileDescriptor(const QByteArray &proto, QString filename)
+bool ProtobufParserCreator::updateDescription(QString filename, QByteArray proto)
 {
+  Info info;
+  info.proto_text = proto;
+
   ArrayInputStream proto_input_stream(proto.data(), proto.size());
   Tokenizer tokenizer(&proto_input_stream, nullptr);
   FileDescriptorProto file_desc_proto;
@@ -256,17 +303,18 @@ bool ProtobufParserCreator::getFileDescriptor(const QByteArray &proto, QString f
   if (!parser.Parse(&tokenizer, &file_desc_proto))
   {
     QMessageBox::warning(nullptr, tr("Error loading file"),
-                         tr("Error parsing the file"),
+                         tr("Error parsing the file %1").arg(filename),
                          QMessageBox::Cancel);
     return false;
   }
+
   if (!file_desc_proto.has_name())
   {
     file_desc_proto.set_name(filename.toStdString());
   }
 
-  const google::protobuf::FileDescriptor* file_desc = _pool.BuildFile(file_desc_proto);
-  if (file_desc == nullptr)
+  info.file_descriptor = _pool.BuildFile(file_desc_proto);
+  if (info.file_descriptor == nullptr)
   {
     QMessageBox::warning(nullptr, tr("Error loading file"),
                          tr("Error getting file descriptor."),
@@ -274,7 +322,14 @@ bool ProtobufParserCreator::getFileDescriptor(const QByteArray &proto, QString f
     return false;
   }
 
-  _file_descriptors.insert( filename, file_desc );
+  for(int i=0; i < info.file_descriptor->message_type_count(); i++)
+  {
+    const std::string& type_name = info.file_descriptor->message_type(i)->name();
+    auto descriptor = info.file_descriptor->FindMessageTypeByName(type_name);
+    info.descriptors.insert({QString::fromStdString(type_name), descriptor });
+  }
+
+  _files.insert( filename, info );
 
   // add to the list if not present
   if( ui->listWidget->findItems(filename, Qt::MatchExactly).empty() )
@@ -282,7 +337,5 @@ bool ProtobufParserCreator::getFileDescriptor(const QByteArray &proto, QString f
     ui->listWidget->addItem( filename );
     ui->listWidget->sortItems();
   }
-
-  _proto_files.insert( filename, proto );
   return true;
 }

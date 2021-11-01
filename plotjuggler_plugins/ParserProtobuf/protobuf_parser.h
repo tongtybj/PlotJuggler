@@ -43,6 +43,8 @@ class ProtobufParserCreator : public MessageParserCreator
   Q_PLUGIN_METADATA(IID "facontidavide.PlotJuggler3.MessageParserCreator")
   Q_INTERFACES(PJ::MessageParserCreator)
 
+  void saveSettings();
+
 public:
   ProtobufParserCreator();
 
@@ -62,26 +64,35 @@ public:
   }
 
 protected:
-  const google::protobuf::Descriptor* getDescription();
+
   Ui::ProtobufLoader* ui;
   QWidget* _widget;
 
   google::protobuf::DescriptorPool _pool;
 
-  // key = filename  /  value = raw file content
-  QMap<QString, QByteArray> _proto_files;
+  struct Info
+  {
+    QByteArray proto_text;
+    const google::protobuf::FileDescriptor* file_descriptor = nullptr;
+    std::map<QString,const google::protobuf::Descriptor*> descriptors;
+  };
 
-  QMap<QString, const google::protobuf::FileDescriptor*> _file_descriptors;
+  QString _selected_file;
+  const google::protobuf::Descriptor* _selected_descriptor = nullptr;
 
-  bool getFileDescriptor(const QByteArray& proto, QString filename);
+  QMap<QString, Info> _files;
+
+  bool updateDescription(QString filename, QByteArray proto);
 
 private slots:
 
   void onLoadFile();
 
+  void onRemoveFile();
+
   void onSelectionChanged(int row);
 
-  void onComboChanged(int index);
+  void onComboChanged(const QString &text);
 };
 
 

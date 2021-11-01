@@ -7,23 +7,24 @@
 #include <QIntValidator>
 #include <QMessageBox>
 
-void connect_callback(struct mosquitto *mosq, void *context, int result)
+void connect_callback(struct mosquitto *mosq, void *context, int result,  int, const mosquitto_property *)
 {
   DataStreamMQTT* _this = static_cast<DataStreamMQTT*>(context);
-
-  if( result != 0 )
-  {
-    qDebug() << QString("Problem connecting to MQTT: %1").arg(result);
-    return;
-  }
-
   auto& config = _this->_config;
 
-  for(const auto& topic: config.topics)
+  if( !result)
   {
-    mosquitto_subscribe(mosq, nullptr, topic.c_str(), config.qos);
+    for(const auto& topic: config.topics)
+    {
+      mosquitto_subscribe(mosq, nullptr, topic.c_str(), config.qos);
+    }
   }
-
+  else
+  {
+     QMessageBox::warning(nullptr, "MQTT Client",
+                           QString("Connection error: %1").arg(mosquitto_reason_string(result)),
+                           QMessageBox::Ok);
+  }
 }
 
 void disconnect_callback(struct mosquitto *mosq, void *context, int result)
@@ -32,15 +33,15 @@ void disconnect_callback(struct mosquitto *mosq, void *context, int result)
   qDebug() << "disconnect callback, rc = " << result;
 }
 
-void message_callback(struct mosquitto *mosq, void *context, const struct mosquitto_message *message)
+void message_callback(struct mosquitto *mosq, void *context, const struct mosquitto_message *message, const mosquitto_property *)
 {
   DataStreamMQTT* _this = static_cast<DataStreamMQTT*>(context);
 
   auto it = _this->_parsers.find(message->topic);
   if( it == _this->_parsers.end() )
   {
-    //auto parser = _this->availableParsers()->at( _this->_protocol )->createInstance({}, _this->dataMap());
-    //it = _this->_parsers.insert( {message->topic, parser} ).first;
+    auto parser = _this->availableParsers()->at( _this->_protocol )->createInstance({}, _this->dataMap());
+    it = _this->_parsers.insert( {message->topic, parser} ).first;
   }
   auto& parser = it->second;
 
@@ -109,9 +110,6 @@ public:
     QString topic_filter = settings.value("MosquittoMQTT::filter").toString();
     ui->lineEditTopicFilter->setText(topic_filter );
 
-    QString protocol = settings.value("MosquittoMQTT::serialization_protocol", "JSON").toString();
-    ui->comboBoxProtocol->setCurrentText(protocol);
-
     QString username = settings.value("MosquittoMQTT::username", "").toString();
     ui->lineEditUsername->setText(username);
 
@@ -167,6 +165,38 @@ public:
 };
 
 //---------------------------------------------
+int SetClientOptions(struct mosquitto *mosq, struct MosquittoConfig *cfg)
+{
+  mosquitto_int_option(mosq, MOSQ_OPT_PROTOCOL_VERSION, cfg->protocol_version);
+
+  if(!cfg->will_topic.empty())
+  {
+    if( mosquitto_will_set_v5(
+            mosq,
+            cfg->will_topic.c_str(),
+            cfg->will_payload.size(),
+            cfg->will_payload.c_str(),
+            cfg->will_qos,
+            cfg->will_retain, cfg->will_props))
+    {
+      return 1;
+    }
+  }
+
+  cfg->will_props = nullptr;
+
+  if(( !cfg->username.empty() || !cfg->password.empty()) )
+  {
+    if(mosquitto_username_pw_set(mosq, cfg->username.c_str(), cfg->password.c_str()))
+    {
+      return 1;
+    }
+  }
+
+  mosquitto_max_inflight_messages_set(mosq, cfg->max_inflight);
+
+  return 0;
+}
 
 
 DataStreamMQTT::DataStreamMQTT():
@@ -195,45 +225,51 @@ bool DataStreamMQTT::start(QStringList *)
     return false;
   }
 
-  MQTT_Dialog* dialog = new MQTT_Dialog();
+  MQTT_Dialog dialog;
 
   for( const auto& it: *availableParsers())
   {
-    dialog->ui->comboBoxProtocol->addItem( it.first );
+    dialog.ui->comboBoxProtocol->addItem( it.first );
 
     if(auto widget = it.second->optionsWidget() )
     {
       widget->setVisible(false);
-      dialog->ui->layoutOptions->addWidget( widget );
+      dialog.ui->layoutOptions->addWidget( widget );
     }
   }
 
   std::shared_ptr<MessageParserCreator> parser_creator;
 
-  connect(dialog->ui->comboBoxProtocol, qOverload<int>( &QComboBox::currentIndexChanged), this,
-          [&](int index)
-          {
-            if( parser_creator ){
-              if(auto prev_widget = parser_creator->optionsWidget() ){
+  connect(dialog.ui->comboBoxProtocol,
+          qOverload<const QString &>(&QComboBox::currentIndexChanged),
+          this, [&](const QString & selected_protocol) {
+            if (parser_creator)
+            {
+              if( auto prev_widget = parser_creator->optionsWidget())
+              {
                 prev_widget->setVisible(false);
               }
             }
-            QString protocol = dialog->ui->comboBoxProtocol->itemText(index);
-            parser_creator = availableParsers()->at( protocol );
+            parser_creator = availableParsers()->at(selected_protocol);
 
-            if(auto widget = parser_creator->optionsWidget() ){
+            if (auto widget = parser_creator->optionsWidget())
+            {
               widget->setVisible(true);
             }
           });
 
-  if( dialog->exec() == QDialog::Rejected )
+  QSettings settings;
+  _protocol = settings.value("MosquittoMQTT::serialization_protocol", "JSON").toString();
+
+  dialog.ui->comboBoxProtocol->setCurrentText(_protocol);
+
+  if( dialog.exec() == QDialog::Rejected )
   {
     return false;
   }
 
-  dialog->saveParameters(&_config);
-
-  dialog->deleteLater();
+  dialog.saveParameters(&_config);
+  _protocol = dialog.ui->comboBoxProtocol->currentText();
 
   _subscribed = false;
   _finished = false;
@@ -252,29 +288,41 @@ bool DataStreamMQTT::start(QStringList *)
   }
 
 //  _protocol_issue = false;
+  if(_mosq)
+  {
+    mosquitto_destroy(_mosq);
+  }
+  _mosq = mosquitto_new(_config.id.c_str(), true, this);
 
-  struct mosquitto *mosq = mosquitto_new(_config.id.c_str(), true, this);
-
-  if(!mosq)
+  if(!_mosq)
   {
     QMessageBox::warning(nullptr,tr("MQTT Client"),
                          tr("Problem creating the Mosquitto client"),  QMessageBox::Ok);
-    _running = false;
     return false;
   }
 
-  mosquitto_connect_callback_set(mosq, connect_callback);
-  mosquitto_disconnect_callback_set(mosq, disconnect_callback);
-  mosquitto_message_callback_set(mosq, message_callback);
+  if(SetClientOptions(_mosq, &_config))
+  {
+    QMessageBox::warning(nullptr,tr("MQTT Client"),
+                         tr("Problem seeting the Mosquitto options"),  QMessageBox::Ok);
+    return false;
+  }
 
-  mosquitto_subscribe_callback_set(mosq, subscribe_callback);
-  mosquitto_unsubscribe_callback_set(mosq, unsubscribe_callback);
+  mosquitto_connect_v5_callback_set(_mosq, connect_callback);
+  mosquitto_disconnect_callback_set(_mosq, disconnect_callback);
+  mosquitto_message_v5_callback_set(_mosq, message_callback);
 
-  int rc = mosquitto_connect_bind(mosq,
-                                  _config.host.c_str(),
-                                  _config.port,
-                                  _config.keepalive,
-                                  nullptr); // TODO bind
+  mosquitto_subscribe_callback_set(_mosq, subscribe_callback);
+  mosquitto_unsubscribe_callback_set(_mosq, unsubscribe_callback);
+
+  const mosquitto_property *properties = nullptr; // todo
+
+  int rc = mosquitto_connect_bind_v5(_mosq,
+                                     _config.host.c_str(),
+                                     _config.port,
+                                     _config.keepalive,
+                                     nullptr,
+                                     properties); // TODO bind
   if(rc>0)
   {
     if(rc == MOSQ_ERR_ERRNO)
@@ -299,8 +347,7 @@ bool DataStreamMQTT::start(QStringList *)
 
   _running = true;
 
-  _mqtt_thread = std::thread(
-      [=](){ mosquitto_loop_forever(mosq, -1, 1); });
+  mosquitto_loop_start(_mosq);
 
   return _running;
 }
@@ -309,6 +356,10 @@ void DataStreamMQTT::shutdown()
 {
   if( _running )
   {
+    mosquitto_disconnect(_mosq);
+    mosquitto_loop_stop(_mosq, true);
+    mosquitto_destroy(_mosq);
+    _mosq = nullptr;
     _disconnection_done = false;
     _running = false;
     _parsers.clear();
