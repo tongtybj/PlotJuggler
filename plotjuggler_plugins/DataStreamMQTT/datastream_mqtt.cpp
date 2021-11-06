@@ -94,6 +94,7 @@ public:
     ui->lineEditClientID->setText(uuid);
 
     QSettings settings;
+    restoreGeometry(settings.value("MosquittoMQTT::geometry").toByteArray());
 
     QString host = settings.value("MosquittoMQTT::host").toString();
     ui->lineEditHost->setText( host );
@@ -147,6 +148,7 @@ public:
     }
 
     QSettings settings;
+    settings.setValue("MosquittoMQTT::geometry", this->saveGeometry());
 
     // save back to service
     settings.setValue("MosquittoMQTT::host", ui->lineEditHost->text());
