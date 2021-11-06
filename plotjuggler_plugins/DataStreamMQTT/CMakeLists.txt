@@ -32,7 +32,7 @@ if(MOSQUITTO_FOUND)
         DESTINATION ${PJ_PLUGIN_INSTALL_DIRECTORY}  )
 
 else()
-    message("[libosquittopp-dev] not found. Skipping plugin DataStreamMQTT_Mosquitto.")
+    message("[libosquittopp-dev] not found. Skipping plugin DataStreamMQTT.")
 endif()
 
 
