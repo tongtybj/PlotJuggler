@@ -207,7 +207,7 @@ ProtobufParserCreator::~ProtobufParserCreator()
 MessageParserPtr ProtobufParserCreator::createInstance(
     const std::string &topic_name, PlotDataMapRef &data)
 {
-
+  onComboChanged(ui->comboBox->currentText());
   return std::make_shared<ProtobufParser>(topic_name, data, _selected_descriptor);
 }
 

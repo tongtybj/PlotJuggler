@@ -94,6 +94,11 @@ public:
     return false;
   }
 
+  std::pair<QAction*, int> notificationAction() override
+  {
+    return { _notification_action, _failed_parsing };
+  }
+
   bool _disconnection_done;
   bool _subscribed;
   bool _finished;
@@ -106,6 +111,9 @@ public:
 
   std::thread _mqtt_thread;
   QString _protocol;
+
+  QAction* _notification_action;
+  int _failed_parsing = 0;
 
 private slots:
 

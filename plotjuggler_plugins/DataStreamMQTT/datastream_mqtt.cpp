@@ -42,14 +42,18 @@ void message_callback(struct mosquitto *mosq, void *context, const struct mosqui
 {
   DataStreamMQTT* _this = static_cast<DataStreamMQTT*>(context);
 
+  std::unique_lock<std::mutex> lk(_this->mutex());
+
   auto it = _this->_parsers.find(message->topic);
   if( it == _this->_parsers.end() )
   {
-    auto parser = _this->availableParsers()->at( _this->_protocol )->createInstance({}, _this->dataMap());
+    auto& parser_factory = _this->availableParsers()->at( _this->_protocol );
+    auto parser = parser_factory->createInstance({}, _this->dataMap());
     it = _this->_parsers.insert( {message->topic, parser} ).first;
   }
   auto& parser = it->second;
 
+  bool result = false;
   try {
     MessageRef msg( static_cast<uint8_t*>(message->payload), message->payloadlen);
 
@@ -57,13 +61,17 @@ void message_callback(struct mosquitto *mosq, void *context, const struct mosqui
     auto ts = high_resolution_clock::now().time_since_epoch();
     double timestamp = 1e-6* double( duration_cast<microseconds>(ts).count() );
 
-    parser->parseMessage(msg, timestamp);
+    result = parser->parseMessage(msg, timestamp);
 
   } catch (std::exception& ) {
-//    _this->_protocol_issue = true;
-    return;
   }
+
   emit _this->dataReceived();
+  if( !result )
+  {
+    _this->_failed_parsing++;
+    emit _this->notificationsChanged(_this->_failed_parsing);
+  }
 }
 
 /*
@@ -210,6 +218,20 @@ DataStreamMQTT::DataStreamMQTT():
   _running(false)
 {
   mosquitto_lib_init();
+
+  _notification_action = new QAction(this);
+
+  connect(_notification_action, &QAction::triggered, this, [this]() {
+    QMessageBox::warning(nullptr, "MQTT error",
+                         QString("Failed to parse %1 messages").arg(_failed_parsing),
+                         QMessageBox::Ok);
+
+    if (_failed_parsing > 0)
+    {
+      _failed_parsing = 0;
+      emit notificationsChanged(_failed_parsing);
+    }
+  });
 }
 
 DataStreamMQTT::~DataStreamMQTT()
@@ -224,6 +246,10 @@ bool DataStreamMQTT::start(QStringList *)
   {
     return _running;
   }
+
+  //cleanup notifications
+  _failed_parsing = 0;
+  emit notificationsChanged(0);
 
   if( !availableParsers() )
   {
@@ -370,6 +396,7 @@ void DataStreamMQTT::shutdown()
     _disconnection_done = false;
     _running = false;
     _parsers.clear();
+    dataMap().clear();
   }
 }
 
