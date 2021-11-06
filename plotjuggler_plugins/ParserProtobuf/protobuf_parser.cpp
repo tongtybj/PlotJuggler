@@ -113,7 +113,12 @@ bool ProtobufParser::parseMessage(const MessageRef serialized_msg,
           }break;
           case FieldDescriptor::CPPTYPE_MESSAGE:
           {
-            const auto& new_msg = reflection->GetMessage(msg,field);
+// Fix macro issue in Windows
+#pragma push_macro("GetMessage")
+#undef GetMessage
+            const auto& new_msg = reflection->GetMessage(msg, field, nullptr);
+#pragma pop_macro("GetMessage")
+
             ParseImpl(new_msg, key + suffix);
             is_double = false;
           }break;

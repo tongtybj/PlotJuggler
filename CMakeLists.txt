@@ -119,11 +119,10 @@ endif()
 IF (NOT WIN32)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}  -fPIC")
 else()
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}  -D_USE_MATH_DEFINES")
     set(CMAKE_WIN32_EXECUTABLE ON)
     set(GUI_TYPE WIN32)
 ENDIF()
-
-find_package(ZMQ)
 
 include_directories(
     ${Qt5Core_INCLUDE_DIRS}
@@ -233,15 +232,18 @@ add_subdirectory( plotjuggler_app )
 
 add_subdirectory( plotjuggler_plugins/DataLoadCSV )
 add_subdirectory( plotjuggler_plugins/DataLoadULog )
+
 add_subdirectory( plotjuggler_plugins/DataStreamSample )
 add_subdirectory( plotjuggler_plugins/DataStreamWebsocket )
 add_subdirectory( plotjuggler_plugins/DataStreamUDP )
 add_subdirectory( plotjuggler_plugins/DataStreamMQTT )
+#add_subdirectory( plotjuggler_plugins/DataStreamZMQ )
+
 add_subdirectory( plotjuggler_plugins/StatePublisherCSV )
+
 add_subdirectory( plotjuggler_plugins/ToolboxQuaternion )
 add_subdirectory( plotjuggler_plugins/ToolboxFFT )
+
 add_subdirectory( plotjuggler_plugins/ParserProtobuf )
 
-if( ZMQ_FOUND )
-  add_subdirectory( plotjuggler_plugins/DataStreamZMQ )
-endif()
+

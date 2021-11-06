@@ -7,6 +7,11 @@
 #include <QIntValidator>
 #include <QMessageBox>
 
+#ifdef WIN32
+#include <windows.h>
+#include <strsafe.h>
+#endif
+
 void connect_callback(struct mosquitto *mosq, void *context, int result,  int, const mosquitto_property *)
 {
   DataStreamMQTT* _this = static_cast<DataStreamMQTT*>(context);
