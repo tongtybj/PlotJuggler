@@ -663,7 +663,7 @@ std::map<QString, QColor> PlotWidgetBase::getCurveColors() const
 
 void PlotWidgetBase::setStyle(QwtPlotCurve* curve, CurveStyle style)
 {
-  curve->setPen(curve->pen().color(), (style == DOTS) ? 4.0 : 1.3);
+  curve->setPen(curve->pen().color(), (style == DOTS) ? 4.0 : 4.0);
 
   switch (style)
   {
